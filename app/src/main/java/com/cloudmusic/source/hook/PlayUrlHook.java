@@ -31,7 +31,6 @@ public class PlayUrlHook {
         try {
             Class<?> cls = XposedHelpers.findClassIfExists(className, cl);
             if (cls == null) {
-                log("PlayUrlHook: class not found " + className);
                 return;
             }
             for (Method m : cls.getDeclaredMethods()) {
@@ -46,8 +45,7 @@ public class PlayUrlHook {
                     hook(m, 1, 2);
                 }
             }
-        } catch (Throwable t) {
-            log("PlayUrlHook: hook " + className + " failed: " + t);
+        } catch (Throwable ignore) {
         }
     }
 
@@ -60,9 +58,7 @@ public class PlayUrlHook {
                     handle(param, idIndex, brIndex);
                 }
             });
-            log("PlayUrlHook: hooked " + m);
-        } catch (Throwable t) {
-            log("PlayUrlHook: hookMethod failed " + m + " : " + t);
+        } catch (Throwable ignore) {
         }
     }
 
@@ -119,10 +115,6 @@ public class PlayUrlHook {
                     }
                 }
             }
-            log("PlayUrlHook: " + param.method.getName() + " id=" + id + " reqBr=" + reqBr
-                    + " result=" + (info == null ? "null" : info.getClass().getSimpleName())
-                    + " trial=" + trial
-                    + " originLen=" + (origin == null ? -1 : origin.length()));
 
             if (id <= 0 || info == null) {
                 return;
@@ -133,10 +125,8 @@ public class PlayUrlHook {
             }
             SourceHelper.Result r = SourceHelper.getUrl(id, reqBr);
             if (r == null) {
-                log("PlayUrlHook: no self source for id=" + id);
                 return;
             }
-            log("PlayUrlHook: replace id=" + id + " -> " + r.url);
             XposedHelpers.callMethod(info, "setUrl", r.url);
             XposedHelpers.callMethod(info, "setCode", Integer.valueOf(200));
             XposedHelpers.callMethod(info, "setFee", Integer.valueOf(0));
@@ -155,8 +145,7 @@ public class PlayUrlHook {
             } catch (Throwable ignore) {
             }
             clearFreeTrialInfo(info);
-        } catch (Throwable t) {
-            log("PlayUrlHook: handle failed: " + t);
+        } catch (Throwable ignore) {
         }
     }
 
@@ -174,14 +163,8 @@ public class PlayUrlHook {
         return "standard";
     }
 
-    /** Xpatch 环境下 XposedBridge.log 不进 logcat，直接用 android.util.Log */
-    private static void log(String msg) {
-        android.util.Log.i("YUNYINYUAN", msg);
-    }
-
     /** 清掉试听标记，否则播放器仍按试听片段长度（30~60s）切歌 */
     private static void clearFreeTrialInfo(Object info) {
-        StringBuilder sb = new StringBuilder();
         try {
             for (Method m : info.getClass().getMethods()) {
                 if (m.getParameterTypes().length != 1) {
@@ -192,29 +175,18 @@ public class PlayUrlHook {
                         || "setFreeTimeTrialPrivilege".equals(n)) {
                     try {
                         m.invoke(info, new Object[]{null});
-                        sb.append(n).append("=ok,");
-                    } catch (Throwable t) {
-                        sb.append(n).append("=fail,");
+                    } catch (Throwable ignore) {
                     }
                 }
             }
             try {
                 Object flagObj = XposedHelpers.callMethod(info, "getFlag");
                 if (flagObj instanceof Integer) {
-                    sb.append("flag=").append(flagObj).append(",");
                     XposedHelpers.callMethod(info, "setFlag", ((Integer) flagObj) & ~1024);
                 }
-            } catch (Throwable t) {
-                sb.append("flag=err,");
-            }
-            try {
-                Object ft = XposedHelpers.callMethod(info, "getFreeTrialInfo");
-                sb.append("afterTrialInfo=").append(ft == null ? "null" : "NOTNULL");
-            } catch (Throwable t) {
-                sb.append("afterTrialInfo=err");
+            } catch (Throwable ignore) {
             }
         } catch (Throwable ignore) {
         }
-        log("PlayUrlHook: clear " + sb);
     }
 }

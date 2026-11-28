@@ -16,8 +16,6 @@ import de.robv.android.xposed.XposedHelpers;
  */
 public class TabHideHook {
 
-    private static final String TAG = "YUNYINYUAN";
-
     public TabHideHook(Context context) {
         if (!com.cloudmusic.source.helper.SettingHelper.getInstance()
                 .isEnable(com.cloudmusic.source.helper.SettingHelper.beauty_tab_hide_key)) {
@@ -44,9 +42,7 @@ public class TabHideHook {
             XposedBridge.hookAllMethods(mainCls, "onResume", hook);
             XposedBridge.hookAllMethods(mainCls, "onStart", hook);
             XposedBridge.hookAllMethods(mainCls, "onCreate", hook);
-            android.util.Log.i(TAG, "TabHide: hooked MainActivity lifecycle");
-        } catch (Throwable t) {
-            android.util.Log.i(TAG, "TabHide: failed " + t);
+        } catch (Throwable ignore) {
         }
     }
 
@@ -54,55 +50,20 @@ public class TabHideHook {
         try {
             int id = act.getResources().getIdentifier("bottomNav", "id", act.getPackageName());
             if (id == 0) {
-                android.util.Log.i(TAG, "TabHide: bottomNav id not found");
                 return;
             }
             View nav = act.findViewById(id);
             if (!(nav instanceof ViewGroup)) {
-                android.util.Log.i(TAG, "TabHide: bottomNav not ViewGroup");
                 return;
             }
             ViewGroup g = (ViewGroup) nav;
             int count = g.getChildCount();
-            StringBuilder sb = new StringBuilder();
             for (int i = 0; i < count; i++) {
-                View child = g.getChildAt(i);
-                sb.append(tabText(child)).append('|');
                 if (i > 0 && i < count - 1) {
-                    child.setVisibility(View.GONE);
+                    g.getChildAt(i).setVisibility(View.GONE);
                 }
             }
-            android.util.Log.i(TAG, "TabHide: count=" + count + " tabs=" + sb);
-        } catch (Throwable t) {
-            android.util.Log.i(TAG, "TabHide: hide failed " + t);
-        }
-    }
-
-    private static String tabText(View v) {
-        try {
-            java.util.ArrayList<String> texts = new java.util.ArrayList<>();
-            collect(v, texts);
-            return texts.toString();
-        } catch (Throwable t) {
-            return "?";
-        }
-    }
-
-    private static void collect(View v, java.util.List<String> out) {
-        if (v == null) {
-            return;
-        }
-        if (v instanceof android.widget.TextView) {
-            CharSequence cs = ((android.widget.TextView) v).getText();
-            if (cs != null && cs.length() > 0) {
-                out.add(cs.toString());
-            }
-        }
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) {
-                collect(g.getChildAt(i), out);
-            }
+        } catch (Throwable ignore) {
         }
     }
 }

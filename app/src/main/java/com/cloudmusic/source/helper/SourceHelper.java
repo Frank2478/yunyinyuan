@@ -10,8 +10,7 @@ import java.util.Map;
 /**
  * 自有音源，按播放器请求的码率返回对应音质。
  * gdstudio 的 br 参数单位是 kbps：128 / 192 / 320 / 999(FLAC)。
- * 1. gdstudio（主）
- * 2. s0o1（备用）
+ * 原备源 s0o1 上游超时已失效，移除；改为同一音源命中 503 时短间隔重试。
  */
 public class SourceHelper {
 
@@ -28,12 +27,20 @@ public class SourceHelper {
     }
 
     private static final String GD_API = "https://music-api.gdstudio.xyz/api.php?types=url&source=netease&id=";
-    private static final String S0_API = "https://api.s0o1.com/API/wyy_music";
+    private static final String QJ_API = "https://api.qijieya.cn/meting/?type=url&id=";
+    /** 音源模式，取值与 SourceSelectView 保持一致 */
+    private static final String MODE_AUTO = "auto";
+    private static final String MODE_GD = "gdstudio";
+    private static final String MODE_QJ = "qijieya";
+    /** 自动模式下 gdstudio 拿无损的宽限时间，超时先用 qijieya 兜底 */
+    private static final long GD_GRACE_MS = 1200L;
     private static final long TTL = 5 * 60 * 1000L;
-    /** 解析失败后的冷却时间，避免切歌时反复阻塞播放线程 */
-    private static final long FAIL_TTL = 60 * 1000L;
-    /** 两个音源并发请求的总等待上限：覆盖 API 冷启动（首次 DNS+TLS 约 6-7 秒） */
+    /** 解析失败后的冷却时间，仅短暂避让，避免一次失败连累后续切歌 */
+    private static final long FAIL_TTL = 5 * 1000L;
+    /** 单首歌的总等待上限：覆盖重试与 API 冷启动（首次 DNS+TLS 约 6-7 秒） */
     private static final long WAIT_MS = 8000L;
+    /** gdstudio 会随机命中故障节点返回 503，命中后短间隔重试即可成功 */
+    private static final int MAX_ATTEMPT = 3;
 
     private static final Map<String, Result> CACHE = new HashMap<>();
     private static final Map<String, Long> TIME = new HashMap<>();
@@ -60,7 +67,8 @@ public class SourceHelper {
             return null;
         }
         final String brParam = brParam(reqBr);
-        final String key = id + "_" + brParam;
+        final String mode = mode();
+        final String key = mode + "_" + id + "_" + brParam;
         synchronized (CACHE) {
             Long t = TIME.get(key);
             if (t != null && System.currentTimeMillis() < t) {
@@ -72,31 +80,14 @@ public class SourceHelper {
             }
         }
 
-        //两个音源并发请求，谁先成功用谁，避免串行等待导致播放器切歌
-        final java.util.concurrent.atomic.AtomicReference<Result> out =
-                new java.util.concurrent.atomic.AtomicReference<>();
-        Thread t1 = new Thread(() -> {
-            Result r = requestGdstudio(id, brParam);
-            if (r != null) {
-                out.compareAndSet(null, r);
-            }
-        }, "src-gd");
-        Thread t2 = new Thread(() -> {
-            Result r = requestS0(id, reqBr);
-            if (r != null) {
-                out.compareAndSet(null, r);
-            }
-        }, "src-s0");
-        t1.start();
-        t2.start();
-        long deadline = System.currentTimeMillis() + WAIT_MS;
-        while (System.currentTimeMillis() < deadline && out.get() == null) {
-            try {
-                Thread.sleep(40);
-            } catch (Throwable ignore) {
-            }
+        Result result;
+        if (MODE_GD.equals(mode)) {
+            result = gdWithRetry(id, brParam);
+        } else if (MODE_QJ.equals(mode)) {
+            result = requestQijieya(id);
+        } else {
+            result = auto(id, brParam);
         }
-        Result result = out.get();
         synchronized (CACHE) {
             if (result != null) {
                 CACHE.put(key, result);
@@ -122,6 +113,108 @@ public class SourceHelper {
         return "999";
     }
 
+    /** 当前选中的音源，读 SharedPreferences，切换后下一首即生效 */
+    private static String mode() {
+        try {
+            SettingHelper helper = SettingHelper.getInstance();
+            if (helper != null) {
+                String s = helper.getSource();
+                if (s != null && s.length() > 0) {
+                    return s;
+                }
+            }
+        } catch (Throwable ignore) {
+        }
+        return MODE_AUTO;
+    }
+
+    /** gdstudio 会随机命中故障节点返回 503，命中后短间隔重试，下一次大概率就是 200 */
+    private static Result gdWithRetry(long id, String brParam) {
+        long deadline = System.currentTimeMillis() + WAIT_MS;
+        Result result = null;
+        for (int attempt = 0; attempt < MAX_ATTEMPT; attempt++) {
+            if (attempt > 0) {
+                if (deadline - System.currentTimeMillis() < 600) {
+                    break;
+                }
+                try {
+                    Thread.sleep(attempt == 1 ? 150 : 300);
+                } catch (Throwable ignore) {
+                }
+            }
+            result = requestGdstudio(id, brParam);
+            if (result != null) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /** 自动：两个音源并发，gdstudio 有宽限时间拿无损，超时直接用 qijieya 兜底 */
+    private static Result auto(long id, final String brParam) {
+        final java.util.concurrent.atomic.AtomicReference<Result> gdRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        final java.util.concurrent.atomic.AtomicReference<Result> qjRef =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        new Thread(() -> gdRef.set(gdWithRetry(id, brParam)), "src-gd").start();
+        new Thread(() -> qjRef.set(requestQijieya(id)), "src-qj").start();
+
+        long start = System.currentTimeMillis();
+        long grace = start + GD_GRACE_MS;
+        long deadline = start + WAIT_MS;
+        Result gd = null;
+        Result qj = null;
+        while (System.currentTimeMillis() < deadline) {
+            gd = gdRef.get();
+            if (gd != null) {
+                break;
+            }
+            qj = qjRef.get();
+            if (qj != null && System.currentTimeMillis() >= grace) {
+                break;
+            }
+            try {
+                Thread.sleep(40);
+            } catch (Throwable ignore) {
+            }
+        }
+        if (gd == null) {
+            gd = gdRef.get();
+        }
+        if (qj == null) {
+            qj = qjRef.get();
+        }
+        return gd != null ? gd : qj;
+    }
+
+    /** qijieya 走 302 跳到完整 mp3，读 Location 拿真实地址；只支持 320K */
+    private static Result requestQijieya(long id) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(QJ_API + id).openConnection();
+            conn.setConnectTimeout(4000);
+            conn.setReadTimeout(6000);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+            conn.setRequestProperty("Referer", "https://music.163.com/");
+            if (conn.getResponseCode() != 302) {
+                return null;
+            }
+            String location = conn.getHeaderField("Location");
+            if (location == null || !location.startsWith("http")) {
+                return null;
+            }
+            return new Result(location, 320000, headSize(location));
+        } catch (Throwable ignore) {
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
     private static Result requestGdstudio(long id, String brParam) {
         String body = get(GD_API + id + "&br=" + brParam);
         if (body == null) {
@@ -137,20 +230,6 @@ public class SourceHelper {
             size = headSize(url);
         }
         return new Result(url, brK > 0 ? brK * 1000 : 0, size);
-    }
-
-    private static Result requestS0(long id, int reqBr) {
-        String yz = reqBr >= 740000 ? "3" : reqBr >= 320000 ? "2" : "1";
-        String body = get(S0_API + "?id=" + id + "&yz=" + yz);
-        if (body == null) {
-            return null;
-        }
-        String url = extractString(body, "url");
-        if (url == null || !url.startsWith("http")) {
-            return null;
-        }
-        long size = headSize(url);
-        return new Result(url, reqBr, size);
     }
 
     /** 下载器会严格校验文件长度，没拿到 size 时用 HEAD 取 Content-Length */

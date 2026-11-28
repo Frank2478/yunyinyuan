@@ -53,6 +53,7 @@ import com.cloudmusic.source.view.setting.SignView;
 import com.cloudmusic.source.view.setting.TitleView;
 import com.cloudmusic.source.view.setting.UpdateView;
 import com.cloudmusic.source.view.setting.ListenView;
+import com.cloudmusic.source.view.setting.SourceSelectView;
 import com.cloudmusic.source.view.setting.WarnView;
 
 import java.lang.reflect.Field;
@@ -301,6 +302,8 @@ public class SettingHook {
         warnView.setBaseOnView(masterView);
         BlackView blackView = new BlackView(context);
         blackView.setBaseOnView(masterView);
+        SourceSelectView sourceSelectView = new SourceSelectView(context);
+        sourceSelectView.setBaseOnView(masterView);
         ListenView listenView = new ListenView(context);
         listenView.setBaseOnView(masterView);
         FixCommentView fixCommentView = new FixCommentView(context);
@@ -331,6 +334,7 @@ public class SettingHook {
         dialogRoot.addView(dexView);
         dialogRoot.addView(warnView);
         dialogRoot.addView(blackView);
+        dialogRoot.addView(sourceSelectView);
         dialogRoot.addView(listenView);
         dialogRoot.addView(fixCommentView);
         dialogRoot.addView(updateView);

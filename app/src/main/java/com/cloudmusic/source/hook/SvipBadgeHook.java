@@ -23,7 +23,6 @@ import de.robv.android.xposed.XposedHelpers;
  */
 public class SvipBadgeHook {
 
-    private static final String TAG = "YUNYINYUAN";
     private static final String BADGE_TAG = "yunyinyuan_svip_badge";
     private static final Set<String> CALLED = new HashSet<>();
 
@@ -51,7 +50,6 @@ public class SvipBadgeHook {
                                     return;
                                 }
                             }
-                            android.util.Log.i(TAG, "SvipBadge trace: " + key);
                             //容器渲染入口：注入 SVIP 标签
                             if (simple.contains("Container") && "i".equals(m.getName())
                                     && param.args != null && param.args.length == 3) {
@@ -62,9 +60,7 @@ public class SvipBadgeHook {
                 } catch (Throwable ignore) {
                 }
             }
-            android.util.Log.i(TAG, "SvipBadge: hooked " + simple);
-        } catch (Throwable t) {
-            android.util.Log.i(TAG, "SvipBadge: fail " + className + " " + t);
+        } catch (Throwable ignore) {
         }
     }
 
@@ -95,7 +91,6 @@ public class SvipBadgeHook {
             tv.setPadding(14, 2, 14, 2);
             tv.setGravity(android.view.Gravity.CENTER);
             g.addView(tv);
-            android.util.Log.i(TAG, "SvipBadge: injected");
         } catch (Throwable ignore) {
         }
     }

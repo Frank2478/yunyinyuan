@@ -38,6 +38,10 @@ public class SettingHelper {
     public static final String black_title = "本地黑胶";
     public static final String black_sub = "去广告、鲸云音效、个性换肤等（自定义启动图等需要访问网易服务器的设置不可用）";
 
+    public static final String source_key = "β_source_key";
+    public static final String source_title = "播放音源";
+    public static final String source_sub = "音源失效时可在此手动切换";
+
     public static final String listen_key = "β_listen_key";
     public static final String listen_title = "解锁一起听蒙面查看权限";
     public static final String listen_sub = "开启后可直接查看对方信息，无需对方解除蒙面";
@@ -197,6 +201,15 @@ public class SettingHelper {
 
     public boolean getSetting(String key) {
         return settingMap.get(key);
+    }
+
+    /** 播放音源：auto / gdstudio / qijieya */
+    public String getSource() {
+        return sharedPreferences.getString(source_key, "auto");
+    }
+
+    public void setSource(String source) {
+        sharedPreferences.edit().putString(source_key, source).apply();
     }
 
     public boolean isEnable(String key) {
